@@ -55,6 +55,23 @@ Serving-side capability enforcement is tracked in [#39122](https://github.com/sg
 uv pip install mooncake-transfer-engine
 ```
 
+### External Mooncake Payload Engines
+
+A general SGLang plugin can register a payload factory using
+`register_mooncake_transfer_engine_factory(name, factory)` from
+`sglang.srt.distributed.device_communicators.mooncake_transfer_engine`. Set
+`SGLANG_MOONCAKE_TRANSFER_ENGINE=name` on both P and D to select it. An unknown
+name fails initialization; the default remains `mooncake`.
+
+The factory receives `hostname`, `gpu_id`, and `ib_device` keyword arguments and
+constructs the process-shared engine lazily. It must implement the transfer and
+registration operations used by the deployment, including terminal completion
+before synchronous transfers return. Shared use with Mooncake Store, encoder
+transfer, or elastic expert backup requires their additional engine operations.
+Factory registration does not replace SGLang's bootstrap, request lifecycle,
+abort protocol, or destination-page ownership. Selection cannot change after
+the shared engine has initialized.
+
 ### IB Device Configuration
 
 `--disaggregation-ib-device` supports the following formats when using the Mooncake backend:

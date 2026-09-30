@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import TYPE_CHECKING, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 from sglang.srt.environ import envs
 from sglang.srt.runtime_context import (
@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 # Module-level shared engine instance, set by init_mooncake_transfer_engine().
 _mooncake_transfer_engine: Optional[MooncakeTransferEngine] = None
+_mooncake_transfer_engine_factories: Dict[str, Callable[..., Any]] = {}
+_mooncake_transfer_engine_name: Optional[str] = None
 
 
 def parse_ib_device_config(
@@ -287,6 +289,30 @@ class MooncakeTransferEngine:
         return self.ib_device
 
 
+def register_mooncake_transfer_engine_factory(
+    name: str, factory: Callable[..., Any]
+) -> None:
+    """Select the shared payload engine during plugin registration.
+
+    Select it with ``SGLANG_MOONCAKE_TRANSFER_ENGINE=name``. The factory receives
+    ``hostname``, ``gpu_id`` and ``ib_device`` as keyword
+    arguments. Its result must implement the MooncakeTransferEngine operations
+    used by the selected serving profile. Registration does not initialize the
+    engine or change SGLang's bootstrap and request lifecycle.
+    """
+    if not name or name == "mooncake":
+        raise ValueError("A plugin must use a nonempty, non-builtin engine name")
+    if not callable(factory):
+        raise TypeError("Mooncake transfer engine factory must be callable")
+    if factory is _mooncake_transfer_engine_factories.get(name):
+        return
+    if _mooncake_transfer_engine is not None:
+        raise RuntimeError("Cannot change the Mooncake engine after initialization")
+    if name in _mooncake_transfer_engine_factories:
+        raise RuntimeError(f"Mooncake transfer engine {name!r} is already registered")
+    _mooncake_transfer_engine_factories[name] = factory
+
+
 def init_mooncake_transfer_engine(
     hostname: str,
     gpu_id: Optional[int] = None,
@@ -298,12 +324,24 @@ def init_mooncake_transfer_engine(
     instance. Call from parallel_state when model parallel is set up and
     mooncake transfer is needed.
     """
-    global _mooncake_transfer_engine
+    global _mooncake_transfer_engine, _mooncake_transfer_engine_name
+    name = envs.SGLANG_MOONCAKE_TRANSFER_ENGINE.get()
     if _mooncake_transfer_engine is not None:
+        if name != _mooncake_transfer_engine_name:
+            raise RuntimeError(
+                "Cannot change the selected Mooncake engine after initialization"
+            )
         return _mooncake_transfer_engine
-    _mooncake_transfer_engine = MooncakeTransferEngine(
+    if name == "mooncake":
+        factory = MooncakeTransferEngine
+    else:
+        factory = _mooncake_transfer_engine_factories.get(name)
+        if factory is None:
+            raise ValueError(f"Mooncake transfer engine {name!r} is not registered")
+    _mooncake_transfer_engine = factory(
         hostname=hostname, gpu_id=gpu_id, ib_device=ib_device
     )
+    _mooncake_transfer_engine_name = name
     return _mooncake_transfer_engine
 
 

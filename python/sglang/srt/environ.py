@@ -780,6 +780,7 @@ class Envs:
     # staging_buffer.py once Triton kernels are fully validated in production.
     SGLANG_STAGING_USE_TORCH = EnvBool(False)
     SGLANG_MOONCAKE_CUSTOM_MEM_POOL = EnvStr(None)
+    SGLANG_MOONCAKE_TRANSFER_ENGINE = EnvStr("mooncake")
     # Opt-in limit for the number of KV cache indices represented by one
     # synchronous all-layer Mooncake batch. Set to a positive value to split
     # larger transfers; 0 preserves the legacy single-batch behavior.
