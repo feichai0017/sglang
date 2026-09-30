@@ -342,6 +342,8 @@ class TestDecodeQueueCleanup(CustomTestCase):
             req=req,
             kv_receiver=receiver,
             metadata_buffer_index=3,
+            transfer_observation=None,
+            transfer_failure="failed",
             hicache_restore_status=HiCacheRestoreResult.READY,
         )
 

@@ -622,9 +622,11 @@ class NixlKVManager(StagingManagerMixin, CommonKVManager):
                     continue
                 if msg[0] == b"ABORT_ACK":
                     # Drain ack for an aborted room; aggregate per prefill rank.
-                    if len(msg) >= 3:
+                    if len(msg) == 4:
                         self.note_abort_ack(
-                            int(msg[1].decode("ascii")), int(msg[2].decode("ascii"))
+                            int(msg[1].decode("ascii")),
+                            int(msg[2].decode("ascii")),
+                            msg[3].decode("ascii"),
                         )
                     continue
                 parsed = self.parse_kv_status_message(msg)
@@ -2922,6 +2924,7 @@ class NixlKVManager(StagingManagerMixin, CommonKVManager):
             room_to_be_aborted = int(msg[1].decode("ascii"))
             decode_ip = msg[2].decode("ascii") if len(msg) > 2 else None
             decode_port = int(msg[3].decode("ascii")) if len(msg) > 3 else None
+            abort_token = msg[4].decode("ascii") if len(msg) == 5 else ""
         except Exception as e:
             logger.debug(f"Ignoring malformed abort notification: {e}")
             return True
@@ -2946,20 +2949,15 @@ class NixlKVManager(StagingManagerMixin, CommonKVManager):
                 f"ignoring (already completed or unknown)"
             )
 
-        # Deferred KV release: register only after the status flip above (see
-        # register_deferred_ack_target), then try once -- the room may already be
-        # quiescent and never revisited by the worker. A concluded/unknown room is
-        # acked only when nothing is still counted for it: the ERR path abandons
-        # sibling handles that may still be writing and clear() then drops the
-        # room, so "unknown" alone does not imply quiescent.
+        # Deferred KV release: decide only after the status flip above (see
+        # register_deferred_ack_target). The ack is held while a chunk is still
+        # counted for the room, tracked or not: the ERR path abandons sibling
+        # handles that may still be writing and clear() then drops the room, so
+        # "unknown" alone does not imply quiescent.
         if self.enable_deferred_decode_kv_release and decode_port is not None:
-            if room_active:
-                self.register_deferred_ack_target(
-                    room_to_be_aborted, decode_ip, decode_port
-                )
-                self._maybe_ack_drained_abort(room_to_be_aborted)
-            elif self._staging_outstanding.get(room_to_be_aborted, 0) == 0:
-                self._send_abort_ack(decode_ip, decode_port, room_to_be_aborted)
+            self.handle_deferred_abort_ack(
+                room_to_be_aborted, decode_ip, decode_port, abort_token
+            )
 
         return True
 
